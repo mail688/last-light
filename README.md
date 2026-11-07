@@ -14,6 +14,7 @@ You are the last marine in a city overrun by zombies. Fight your way through dar
 - **Smart zombies:** flow-field pathfinding through the corridors, gunshots attract nearby zombies, plus 3 types: Walker, Runner, Tank
 - **Survival:** limited ammo, ammo boxes and medkits, rifle-butt melee attack
 - **Procedural sound:** every sound is synthesized live with the Web Audio API (gunshot with reverb, reload, growls with stereo position)
+- **Zombie Coins & shop:** earn ZC (+10 per kill, +50 per rescue, +100 per wave survived) and buy 4 extra weapons (SMG, shotgun, sniper rifle, minigun) and 5 marine skins. Progress is saved in the browser.
 - **Everything in one file:** no engine, no libraries, no images. Pure HTML5 Canvas + JavaScript.
 
 ## Controls

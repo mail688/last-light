@@ -161,11 +161,12 @@ function startAmbient() {
   const gn = ac.createGain(); gn.gain.value = .05; s.connect(f); f.connect(gn); gn.connect(master); s.start();
 }
 const sfx = {
-  shot() {                                   // Gewehrschuss: Knall + Körper + Druckwelle + Hall
-    nz({ dur: .025, vol: 1, type: 'highpass', freq: 2200, wet: .15 });
-    nz({ dur: .16, vol: .95, type: 'lowpass', freq: rnd(3200, 4200), freqEnd: 350, wet: .5 });
-    os({ type: 'sine', f: rnd(140, 165), fEnd: 38, dur: .16, vol: 1, wet: .25 });
-    nz({ dur: .7, vol: .09, type: 'bandpass', freq: 700, q: .6, delay: .015, wet: 1 });
+  shot(w) {                                  // Schuss: Knall + Körper + Druckwelle + Hall (je Waffe anders)
+    const S = (w && w.snd) || { body: 1, low: 1, len: 1, tail: 1 };
+    nz({ dur: .025, vol: 1, type: 'highpass', freq: 2200 * S.body, wet: .15 });
+    nz({ dur: .16 * S.len, vol: .95, type: 'lowpass', freq: rnd(3200, 4200) * S.body, freqEnd: 350 * S.low, wet: .5 });
+    os({ type: 'sine', f: rnd(140, 165) * S.low, fEnd: 38, dur: .16 * S.len, vol: 1, wet: .25 });
+    nz({ dur: .7 * S.tail, vol: .09 * S.tail, type: 'bandpass', freq: 700 * S.low, q: .6, delay: .015, wet: 1 });
     const d = rnd(.32, .5);                   // Hülse klimpert
     os({ f: rnd(4800, 5600), dur: .035, vol: .035, delay: d, wet: .1 });
     os({ f: rnd(5800, 6600), dur: .03, vol: .025, delay: d + rnd(.05, .09), wet: .1 });
@@ -189,6 +190,9 @@ const sfx = {
     nz({ dur: .1, vol: .15, type: 'bandpass', freq: 1800, q: 1.5, delay: 1.24, wet: .2 });
     nz({ dur: .015, vol: .45, type: 'highpass', freq: 3800, delay: 1.36, wet: .25 });
   },
+  coin() { os({ type: 'triangle', f: 1320, dur: .06, vol: .05, wet: .1 }); os({ type: 'triangle', f: 1760, dur: .09, vol: .05, delay: .06, wet: .1 }); },
+  buy() { [660, 880, 1100, 1320].forEach((f, i) => os({ type: 'triangle', f, dur: .1, vol: .06, delay: i * .06, wet: .2 })); },
+  nope() { os({ type: 'square', f: 180, fEnd: 120, dur: .18, vol: .05, wet: .1 }); },
   dry() { nz({ dur: .012, vol: .35, type: 'highpass', freq: 5000, wet: .2 }); os({ type: 'square', f: 2200, dur: .012, vol: .03 }); },
   melee() { nz({ dur: .14, vol: .3, type: 'bandpass', freq: 1400, freqEnd: 350, q: 1.2, wet: .15 }); },
   hurt() { os({ type: 'sawtooth', f: 150, fEnd: 85, dur: .22, vol: .35, filter: 'lowpass', ff: 700, wet: .2 }); nz({ dur: .12, vol: .4, type: 'lowpass', freq: 500, wet: .1 }); },
@@ -213,6 +217,7 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); keys.add(k);
   if (k === 'v') toggleFullscreen();
   if (state === 'device') { if (k === '1' || k === 'enter') chooseDevice(false); if (k === '2') chooseDevice(true); return; }
+  if (state === 'shop') { if (k === 'escape' || k === 'backspace') { state = 'menu'; sfx.ui(); } if (k === 'arrowleft' || k === 'arrowright') shopTab = 1 - shopTab; return; }
   if (state === 'menu') {
     if (k >= '1' && k <= '3') selectLevel(+k - 1);
     if (k === 'arrowleft') { selDiff = Math.max(0, selDiff - 1); sfx.ui(); }
@@ -239,7 +244,7 @@ cv.addEventListener('mousedown', e => {
 });
 // Klick/Tipp auf Bildschirme ausserhalb des Spiels (Geräteauswahl, Menü, Pause, Game Over)
 function tapUI() {
-  if (state === 'device' || state === 'menu') { menuClick(); return true; }
+  if (state === 'device' || state === 'menu' || state === 'shop') { menuClick(); return true; }
   if (paused) { menuClick(); return true; }
   if (state === 'over') { if (overT > 1 && !menuClick()) newGame(); return true; }
   return false;
@@ -624,6 +629,44 @@ function randomFloor(cond, tries = 300) {
 }
 
 // =====================================================================
+//  ZOMBIE COINS (ZC), WAFFEN & SKINS – werden im Browser gespeichert
+// =====================================================================
+const WEAPONS = [
+  { id: 'rifle', name: 'STURMGEWEHR', price: 0, desc: 'Zuverlässiger Allrounder', mag: 30, rate: .105, spread: .025, bloom: .018, maxBloom: .14, pellets: 1, dmg: 1, pierce: 0, range: .6, reload: 1.5, reserveMul: 1, move: 1, kick: 2.2, flash: 140, snd: { body: 1, low: 1, len: 1, tail: 1 }, stats: [2, 4, 3] },
+  { id: 'smg', name: 'MASCHINENPISTOLE', price: 800, desc: 'Sehr schnell, streut stark', mag: 40, rate: .06, spread: .05, bloom: .012, maxBloom: .2, pellets: 1, dmg: 1, pierce: 0, range: .45, reload: 1.3, reserveMul: 1.4, move: 1.08, kick: 1.3, flash: 110, snd: { body: 1.25, low: 1.25, len: .7, tail: .7 }, stats: [1, 5, 4] },
+  { id: 'shotgun', name: 'SCHROTFLINTE', price: 1500, desc: '8 Schrotkugeln, kurze Reichweite', mag: 8, rate: .7, spread: .2, bloom: 0, maxBloom: 0, pellets: 8, dmg: 1, pierce: 0, range: .22, reload: 2, reserveMul: .35, move: 1, kick: 5, flash: 170, snd: { body: .8, low: .7, len: 1.6, tail: 1.5 }, stats: [5, 1, 1] },
+  { id: 'sniper', name: 'SCHARFSCHÜTZE', price: 2500, desc: '4 Schaden, durchschlägt 3 Zombies', mag: 5, rate: .9, spread: .004, bloom: 0, maxBloom: 0, pellets: 1, dmg: 4, pierce: 3, range: .9, reload: 2.2, reserveMul: .25, move: .92, kick: 6, flash: 190, snd: { body: .9, low: .8, len: 1.4, tail: 2 }, stats: [5, 1, 1] },
+  { id: 'minigun', name: 'MINIGUN', price: 6000, desc: '100 Schuss Dauerfeuer, macht langsam', mag: 100, rate: .045, spread: .06, bloom: .006, maxBloom: .12, pellets: 1, dmg: 1, pierce: 0, range: .55, reload: 3.2, reserveMul: 3, move: .7, kick: 1.6, flash: 130, snd: { body: 1.15, low: 1.1, len: .6, tail: .6 }, stats: [2, 5, 5] },
+];
+const SKINS = [
+  { id: 'standard', name: 'STANDARD', price: 0, pal: { k: '#0c100e', l: '#7a9a66', a: '#4a6842', A: '#2f4430', V: '#1d7f9e', v: '#8ff4ff', b: '#5e4c30' } },
+  { id: 'desert', name: 'WÜSTE', price: 500, pal: { k: '#1a140c', l: '#d8c08a', a: '#b89a62', A: '#8a7046', V: '#7a3a1a', v: '#ffb060', b: '#5a4026' } },
+  { id: 'arctic', name: 'ARKTIS', price: 800, pal: { k: '#14181c', l: '#f2f6f8', a: '#c8d2d8', A: '#8e9ca6', V: '#1d5f9e', v: '#9fe0ff', b: '#5a646c' } },
+  { id: 'nightops', name: 'NACHT-OPS', price: 1200, pal: { k: '#050506', l: '#3a3d42', a: '#24262a', A: '#141518', V: '#7a0a0a', v: '#ff3030', b: '#2a2a2a' } },
+  { id: 'neon', name: 'NEON', price: 3000, pal: { k: '#0a0614', l: '#ff4fd8', a: '#7a2aff', A: '#3a1490', V: '#00d0a0', v: '#60ffe0', b: '#2a1050' } },
+  { id: 'gold', name: 'GOLD', price: 5000, pal: { k: '#2a1a04', l: '#fff0a0', a: '#e8b830', A: '#a07810', V: '#3a2a10', v: '#ffffff', b: '#7a5a10' } },
+];
+const SKIN_SPR = {}; for (const sk of SKINS) { const s = sprite(MARINE.concat(LEGS[2]), sk.pal); SKIN_SPR[sk.id] = s; }
+let save = { zc: 0, weapons: ['rifle'], skins: ['standard'], weapon: 'rifle', skin: 'standard' };
+try { const j = JSON.parse(localStorage.getItem('lastlight_save') || 'null'); if (j) save = { ...save, ...j }; } catch (e) { }
+function writeSave() { try { localStorage.setItem('lastlight_save', JSON.stringify(save)); } catch (e) { } }
+let runZC = 0;
+function addZC(n, x, y) {
+  save.zc += n; runZC += n; writeSave(); sfx.coin();
+  if (x !== undefined) floatText(x, y, '+' + n + ' ZC', '#ffcf3a', 1.2);
+}
+const curWeapon = () => WEAPONS.find(w => w.id === save.weapon) || WEAPONS[0];
+let shopTab = 0, shopMsg = null;
+function shopAction(item, kind) {
+  const owned = kind === 'w' ? save.weapons : save.skins;
+  if (owned.includes(item.id)) { if (kind === 'w') save.weapon = item.id; else save.skin = item.id; writeSave(); sfx.ui(); shopMsg = { t: 1.6, text: item.name + ' ausgerüstet', col: '#6dff8a' }; return; }
+  if (save.zc < item.price) { sfx.nope(); shopMsg = { t: 1.8, text: 'Zu wenig ZC – dir fehlen ' + (item.price - save.zc) + ' ZC', col: '#ff6060' }; return; }
+  save.zc -= item.price; owned.push(item.id);
+  if (kind === 'w') save.weapon = item.id; else save.skin = item.id;
+  writeSave(); sfx.buy(); shopMsg = { t: 2, text: item.name + ' gekauft und ausgerüstet!', col: '#ffcf3a' };
+}
+
+// =====================================================================
 //  SCHWIERIGKEIT
 // =====================================================================
 const DIFFS = [
@@ -652,8 +695,11 @@ function toMenu() { state = 'menu'; touch.move = { id: null }; touch.aim = { id:
 function newGame() {
   diff = DIFFS[selDiff];
   loadLevel(selLevel); startAmbient();
-  player = { x: START.x, y: START.y, hp: diff.pHp, maxHp: diff.pHp, inv: 0, mag: 30, magMax: 30, reserve: diff.reserve, reload: 0, cool: 0, anim: 0, face: 1,
-    muzzle: 0, moving: false, lamp: true, aim: -Math.PI / 2, spread: 0, melee: 0, swing: 0 };
+  const wp = curWeapon(), sk = SKINS.find(k => k.id === save.skin) || SKINS[0];
+  SPR.player = makeSet(MARINE, LEGS, sk.pal, null);
+  player = { x: START.x, y: START.y, hp: diff.pHp, maxHp: diff.pHp, inv: 0, mag: wp.mag, magMax: wp.mag, reserve: Math.round(diff.reserve * wp.reserveMul), reload: 0, cool: 0, anim: 0, face: 1,
+    muzzle: 0, moving: false, lamp: true, aim: -Math.PI / 2, spread: 0, melee: 0, swing: 0, weapon: wp };
+  runZC = 0;
   zombies = []; survivors = []; bullets = []; parts = []; floats = []; trail = []; pickups = []; dyn = []; motes = [];
   for (let i = 0; i < 46; i++) motes.push({ x: START.x + rnd(-120, 120), y: START.y + rnd(-90, 90), vx: rnd(-3, 3), vy: rnd(-3, 3), ph: rnd(0, 6) });
   score = 0; rescued = 0; lost = 0; kills = 0; shake = 0; msg = null; paused = false; joinCounter = 0;
@@ -728,7 +774,7 @@ function spawnGroup() {
 function tryReload() {
   if (!inPlay()) return;
   const p = player;
-  if (p.reload <= 0 && p.mag < p.magMax && p.reserve > 0) { p.reload = 1.5; sfx.reload(); }
+  if (p.reload <= 0 && p.mag < p.magMax && p.reserve > 0) { p.reload = p.weapon.reload; sfx.reload(); }
   else if (p.reserve <= 0 && p.mag === 0) floatText(p.x, p.y - 16, 'KEINE MUNITION!', '#ff6060', .8);
 }
 function blood(x, y, n, spd = 60, decalChance = .3) {
@@ -747,7 +793,7 @@ function addDyn(x, y, r, rgb, int, t, rays = 20) { dyn.push({ x, y, r, rgb, int,
 function killZombie(z, i) {
   zombies.splice(i, 1); kills++;
   const pts = { walker: 10, runner: 15, tank: 50 }[z.type]; score += pts;
-  floatText(z.x, z.y - 14, '+' + pts, '#ddd');
+  addZC(10, z.x, z.y - 14);
   blood(z.x, z.y - 4, z.type === 'tank' ? 30 : 18, 80, .2); splat(z.x, z.y, z.type === 'tank' ? 9 : 6);
   sfx.zDie(panOf(z.x)); shake = Math.max(shake, z.type === 'tank' ? 5 : 2.5);
   if (Math.random() < (z.type === 'tank' ? .8 : .07)) pickups.push({ x: z.x, y: z.y, type: 'ammo', amount: z.type === 'tank' ? 30 : 10 });
@@ -770,7 +816,7 @@ function update(dt) {
   if (keys.has('s') || keys.has('arrowdown')) ay++;
   if (touch.mobile && touch.move.id !== null) { ax += touch.move.dx; ay += touch.move.dy; }
   const al = Math.hypot(ax, ay), amag = Math.min(1, al); p.moving = al > .12;
-  const spd = 60 * (p.reload > 0 ? .8 : 1);
+  const spd = 60 * p.weapon.move * (p.reload > 0 ? .8 : 1);
   if (p.moving) { p.x += ax / al * spd * amag * dt; p.y += ay / al * spd * amag * dt; p.anim += dt * 8; stepT -= dt; if (stepT <= 0) { sfx.step(); stepT = .34; } }
   pushOut(p, 4);
   const lt = trail[trail.length - 1];
@@ -801,13 +847,16 @@ function update(dt) {
   if (p.reload > 0) { p.reload -= dt; if (p.reload <= 0) { const need = p.magMax - p.mag, take = Math.min(need, p.reserve); p.mag += take; p.reserve -= take; } }
   if (mouse.down && p.cool <= 0 && p.reload <= 0) {
     if (p.mag > 0) {
-      const a = aim + rnd(-1, 1) * (.025 + p.spread), gx = p.x + Math.cos(aim) * 9, gy = p.y - 5 + Math.sin(aim) * 9;
-      if (!opaqueAt(gx, gy)) bullets.push({ x: gx, y: gy, px: gx, py: gy, vx: Math.cos(a) * 420, vy: Math.sin(a) * 420, life: .6 });
-      p.mag--; p.cool = .105; p.muzzle = .05; p.spread = Math.min(.14, p.spread + .018);
-      shake = Math.max(shake, 1.6); kick.x -= Math.cos(aim) * 2.2; kick.y -= Math.sin(aim) * 2.2;
-      p.x -= Math.cos(aim) * .6; p.y -= Math.sin(aim) * .6; pushOut(p, 4);
-      sfx.shot();
-      addDyn(p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10, 140, [255, 196, 120], 1, .055, 48);
+      const w = p.weapon, gx = p.x + Math.cos(aim) * 9, gy = p.y - 5 + Math.sin(aim) * 9;
+      for (let k = 0; k < w.pellets; k++) {
+        const a = aim + rnd(-1, 1) * (w.spread + p.spread), sp = 420 * (w.pellets > 1 ? rnd(.85, 1.1) : 1);
+        if (!opaqueAt(gx, gy)) bullets.push({ x: gx, y: gy, px: gx, py: gy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: w.range * (w.pellets > 1 ? rnd(.8, 1.2) : 1), dmg: w.dmg, pierce: w.pierce, hit: [] });
+      }
+      p.mag--; p.cool = w.rate; p.muzzle = .05; p.spread = Math.min(w.maxBloom, p.spread + w.bloom);
+      shake = Math.max(shake, 1.2 + w.kick * .3); kick.x -= Math.cos(aim) * w.kick; kick.y -= Math.sin(aim) * w.kick;
+      p.x -= Math.cos(aim) * .25 * w.kick; p.y -= Math.sin(aim) * .25 * w.kick; pushOut(p, 4);
+      sfx.shot(w);
+      addDyn(p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10, w.flash, [255, 196, 120], 1, .055, 48);
       parts.push({ x: p.x, y: p.y - 5, vx: -Math.sin(aim) * 35 * p.face + rnd(-10, 10), vy: rnd(-45, -25), life: .3, col: '#d9b45a', decal: Math.random() < .3, grav: true });
       for (let k = 0; k < 2; k++) parts.push({ x: gx, y: gy, vx: Math.cos(aim) * rnd(8, 20) + rnd(-5, 5), vy: Math.sin(aim) * rnd(8, 20) - rnd(3, 8), life: rnd(.4, .8), max: .8, col: 'smoke' });
       alertNear(p.x, p.y, 170);
@@ -842,11 +891,13 @@ function update(dt) {
       }
       for (let j = zombies.length - 1; j >= 0; j--) {
         const z = zombies[j];
+        if (b.hit.includes(z)) continue;
         if (Math.hypot(z.x - b.x, z.y - 5 - b.y) < (z.type === 'tank' ? 8 : 6)) {
-          z.hp--; z.flash = .08; z.mode = 'chase';
+          z.hp -= b.dmg; z.flash = .08; z.mode = 'chase'; b.hit.push(z);
           if (z.type !== 'tank') { const bl = Math.hypot(b.vx, b.vy); z.x += b.vx / bl * 2.5; z.y += b.vy / bl * 2.5; z.stun = .08; pushOut(z, z.r); }
           blood(b.x, b.y, 7, 70, .25); sfx.flesh();
           if (z.hp <= 0) killZombie(z, j);
+          if (b.pierce > 0) { b.pierce--; continue; }
           dead = true; break;
         }
       }
@@ -951,7 +1002,7 @@ function update(dt) {
     const s = survivors[i];
     if (s.state === 'follow' && Math.hypot(s.x - EVAC.x, s.y - EVAC.y) < EVAC.r) {
       survivors.splice(i, 1); rescued++; waveRescued++; score += 100;
-      floatText(s.x, s.y - 16, 'GERETTET +100', '#6dff8a'); sfx.rescue();
+      floatText(s.x, s.y - 24, 'GERETTET!', '#6dff8a'); addZC(50, s.x, s.y - 16); sfx.rescue();
       for (let k = 0; k < 16; k++) parts.push({ x: s.x, y: s.y - 5, vx: rnd(-30, 30), vy: rnd(-70, -20), life: rnd(.4, .8), col: '#6dff8a' });
     }
   }
@@ -959,7 +1010,7 @@ function update(dt) {
   for (let i = pickups.length - 1; i >= 0; i--) {
     const q = pickups[i];
     if (Math.hypot(q.x - p.x, q.y - p.y) < 11) {
-      if (q.type === 'ammo') { p.reserve += q.amount; sfx.pickAmmo(); floatText(q.x, q.y - 10, '+' + q.amount + ' MUNITION', '#e0c040'); pickups.splice(i, 1); }
+      if (q.type === 'ammo') { const am = Math.max(1, Math.round(q.amount * p.weapon.reserveMul)); p.reserve += am; sfx.pickAmmo(); floatText(q.x, q.y - 10, '+' + am + ' MUNITION', '#e0c040'); pickups.splice(i, 1); }
       else if (p.hp < p.maxHp) { p.hp = Math.min(p.maxHp, p.hp + 2); sfx.pickMed(); floatText(q.x, q.y - 10, '+2 LEBEN', '#ff8080'); pickups.splice(i, 1); }
     }
   }
@@ -983,9 +1034,9 @@ function update(dt) {
   kick.x *= Math.pow(.0005, dt); kick.y *= Math.pow(.0005, dt);
 
   if (state === 'play' && toSpawn === 0 && zombies.length === 0 && survivors.length === 0) {
-    state = 'inter'; interT = 5; const bonus = waveRescued * 50; score += bonus;
+    state = 'inter'; interT = 5; const bonus = waveRescued * 50; score += bonus; addZC(100);
     p.hp = Math.min(p.maxHp, p.hp + diff.heal); p.reserve += diff.bonusAmmo;
-    say('WELLE ' + wave + ' GESICHERT · Bonus +' + bonus + (diff.heal ? ' · +' + diff.heal + ' Leben' : ''), '#6dff8a', 4);
+    say('WELLE ' + wave + ' ÜBERLEBT · +100 ZC' + (diff.heal ? ' · +' + diff.heal + ' Leben' : ''), '#ffcf3a', 4);
   }
   if (p.hp <= 0) {
     state = 'over'; overT = 0; sfx.lost();
@@ -1079,7 +1130,7 @@ const lightLevel = L => {
 };
 
 function render() {
-  const inGame = state !== 'menu' && state !== 'device';
+  const inGame = state !== 'menu' && state !== 'device' && state !== 'shop';
   if (!inGame) {
     time += 1 / 60;
     cam.x = clamp(WW / 2 - W / 2 + Math.sin(time * .12) * 300, 0, WW - W);
@@ -1112,7 +1163,7 @@ function render() {
         if (up) drawGun(cx, cy);
         e.scr = drawChar(e, SPR.player, cx, cy);
         if (!up) drawGun(cx, cy);
-        if (e.reload > 0) { g.fillStyle = '#111'; g.fillRect(e.scr.x, e.scr.y - 5, 10, 3); g.fillStyle = '#ffd34d'; g.fillRect(e.scr.x + 1, e.scr.y - 4, Math.round(8 * (1 - e.reload / 1.5)), 1); }
+        if (e.reload > 0) { g.fillStyle = '#111'; g.fillRect(e.scr.x, e.scr.y - 5, 10, 3); g.fillStyle = '#ffd34d'; g.fillRect(e.scr.x + 1, e.scr.y - 4, Math.round(8 * (1 - e.reload / e.weapon.reload)), 1); }
       } else if (it.k === 'z') {
         e.scr = drawChar(e, SPR[e.type], cx, cy);
         if (e.type === 'tank' && e.hp < e.maxHp) { g.fillStyle = '#111'; g.fillRect(e.scr.x + 1, e.scr.y - 4, 10, 2); g.fillStyle = '#c03030'; g.fillRect(e.scr.x + 1, e.scr.y - 4, Math.round(10 * e.hp / e.maxHp), 2); }
@@ -1191,7 +1242,8 @@ function render() {
     for (const s of survivors) if (s.state === 'wait') edgeArrow(s.x, s.y, '#ffd34d');
     if (survivors.some(s => s.state === 'follow')) edgeArrow(EVAC.x, EVAC.y, '#6dff8a');
     for (let i = 0; i < player.maxHp; i++) g.drawImage(i < player.hp ? heartFull : heartEmpty, 3 + i * 9, 3);
-    for (let i = 0; i < player.magMax; i++) { g.fillStyle = i < player.mag ? '#d9b45a' : '#3a3528'; g.fillRect(W - 4 - i * 3, H - 8, 2, 5); }
+    if (player.magMax <= 40) { for (let i = 0; i < player.magMax; i++) { g.fillStyle = i < player.mag ? '#d9b45a' : '#3a3528'; g.fillRect(W - 4 - i * 3, H - 8, 2, 5); } }
+    else { g.fillStyle = '#3a3528'; g.fillRect(W - 92, H - 8, 89, 5); g.fillStyle = '#d9b45a'; g.fillRect(W - 92, H - 8, Math.round(89 * player.mag / player.magMax), 5); }
   }
   if (!touch.mobile && !(state === 'device' && isTouchDevice())) {
   const mx = Math.round(mouse.x), my = Math.round(mouse.y);
@@ -1205,11 +1257,13 @@ function render() {
   buttons = [];
   if (state === 'device') { renderDevice(); return; }
   if (state === 'menu') { renderMenu(); renderRotateHint(); return; }
+  if (state === 'shop') { renderShop(); renderRotateHint(); return; }
   txt('EXIT', EVAC.x - cx, EVAC.y - cy - 32, 4.5, '#6dff8a', 'center');
 
   txt('WELLE ' + wave, 3, 11, 4.8, '#ffd34d');
   txt(level.short + ' · ' + diff.name, 3, 18, 3.6, diff.col);
   txt('PUNKTE ' + score, W - 3, 3, 5, '#fff', 'right');
+  txt(save.zc + ' ZC', W - 3, 11, 4.4, '#ffcf3a', 'right');
   const waiting = survivors.filter(s => s.state === 'wait').length, foll = survivors.length - waiting;
   txt(`Wartend ${waiting} · Folgen ${foll} · Gerettet ${rescued} · Zombies ${zombies.length + toSpawn}`, W / 2, 3, 4, '#cfcfcf', 'center');
   txt(player.reload > 0 ? 'NACHLADEN…' : `${player.mag} / ${player.reserve}`, W - 3, H - 16, 4.6, player.mag === 0 ? '#ff6060' : player.reserve < 30 ? '#ff9a40' : '#d9b45a', 'right');
@@ -1231,7 +1285,8 @@ function render() {
     txt(`${level.name} · ${diff.name}`, W / 2, 62, 4.8, diff.col, 'center');
     txt(`Welle ${wave} · ${score} Punkte · ${rescued} gerettet · ${kills} Zombies`, W / 2, 72, 5, '#eee', 'center');
     const b = getBest(levelIdx, DIFFS.indexOf(diff));
-    txt(score >= b && score > 0 ? 'NEUER REKORD!' : 'Rekord: ' + b, W / 2, 84, 5, '#ffd34d', 'center');
+    txt(score >= b && score > 0 ? 'NEUER REKORD!' : 'Rekord: ' + b, W / 2, 82, 5, '#ffd34d', 'center');
+    txt(`+${runZC} ZC verdient · Kontostand ${save.zc} ZC`, W / 2, 90, 5, '#ffcf3a', 'center');
     if (overT > 1) {
       uiButton(W / 2 - 105, 100, 100, 16, 'NOCHMAL', () => newGame(), '#6dff8a');
       uiButton(W / 2 + 5, 100, 100, 16, 'HAUPTMENÜ', () => { sfx.ui(); toMenu(); }, '#d83a4a');
@@ -1310,12 +1365,64 @@ function renderDevice() {
   renderRotateHint();
 }
 
+// ---------- Shop ----------
+function coinIcon(x, y, r) { circle(x, y, r, '#ffcf3a', '#a07810'); txt('Z', x, y - r * .6, r * 1.3, '#7a5a10', 'center'); }
+function renderShop() {
+  const ox = Math.round((W - 320) / 2), oy = Math.round((H - 180) / 2);
+  const hover = (x, y, w, h) => !touch.mobile && mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h;
+  ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(0, 0, cv.width, cv.height);
+  txt('SHOP', W / 2, oy + 4, 14, '#ffcf3a', 'center');
+  uiButton(ox + 8, oy + 6, 56, 13, '< ZURÜCK', () => { sfx.ui(); state = 'menu'; });
+  box(ox + 248, oy + 6, 64, 13, 'rgba(40,30,6,.9)', '#ffcf3a', 1.2);
+  coinIcon(ox + 257, oy + 12.5, 3.6); txt(save.zc + ' ZC', ox + 286, oy + 9.5, 4.8, '#ffcf3a', 'center');
+  ['WAFFEN', 'SKINS'].forEach((t, i) => {
+    const x = ox + 90 + i * 74, y = oy + 26, sel = i === shopTab;
+    box(x, y, 68, 12, sel ? 'rgba(60,46,10,.95)' : hover(x, y, 68, 12) ? 'rgba(30,30,30,.9)' : 'rgba(12,12,12,.85)', sel ? '#ffcf3a' : '#555', sel ? 1.5 : 1);
+    txt(t, x + 34, y + 3, 5, sel ? '#ffcf3a' : '#aaa', 'center');
+    buttons.push({ x, y, w: 68, h: 12, act: () => { shopTab = i; sfx.ui(); } });
+  });
+  const items = shopTab === 0 ? WEAPONS : SKINS, kind = shopTab === 0 ? 'w' : 's';
+  const owned = kind === 'w' ? save.weapons : save.skins, equipped = kind === 'w' ? save.weapon : save.skin;
+  items.forEach((it, i) => {
+    const col = i % 3, row = Math.floor(i / 3), x = ox + 10 + col * 102, y = oy + 44 + row * 63, w = 96, h = 58;
+    const own = owned.includes(it.id), eq = equipped === it.id, afford = save.zc >= it.price, hv = hover(x, y, w, h);
+    box(x, y, w, h, eq ? 'rgba(30,60,40,.92)' : hv ? 'rgba(36,34,28,.95)' : 'rgba(14,14,14,.9)', eq ? '#6dff8a' : own ? '#888' : afford ? '#ffcf3a' : '#444', eq ? 1.5 : 1);
+    txt(it.name, x + w / 2, y + 3, 4.6, '#fff', 'center');
+    if (kind === 'w') {
+      txt(it.desc, x + w / 2, y + 11, 3.2, '#aaa', 'center');
+      ['SCHADEN', 'TEMPO', 'MAGAZIN'].forEach((lab, k) => {
+        const yy = y + 19 + k * 7;
+        txt(lab, x + 6, yy, 3.2, '#999');
+        for (let b = 0; b < 5; b++) { ctx.fillStyle = b < it.stats[k] ? '#ffcf3a' : '#333'; ctx.fillRect((x + 46 + b * 9) * scale, (yy + .5) * scale, 7 * scale, 3 * scale); }
+      });
+    } else {
+      const img = SKIN_SPR[it.id], sz = 2.6;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, (x + w / 2 - img.width * sz / 2) * scale, (y + 11) * scale, img.width * sz * scale, img.height * sz * scale);
+    }
+    const label = eq ? 'AUSGERÜSTET' : own ? 'AUSRÜSTEN' : it.price + ' ZC';
+    box(x + 14, y + h - 13, w - 28, 10, eq ? 'rgba(40,90,55,.9)' : own ? 'rgba(40,40,40,.9)' : afford ? 'rgba(90,66,10,.95)' : 'rgba(40,20,20,.9)', null);
+    txt(label, x + w / 2, y + h - 11, 4.2, eq ? '#6dff8a' : own ? '#ddd' : afford ? '#ffcf3a' : '#ff7070', 'center');
+    buttons.push({ x, y, w, h, act: () => shopAction(it, kind) });
+  });
+  if (shopMsg && shopMsg.t > 0) { shopMsg.t -= 1 / 60; ctx.globalAlpha = Math.min(1, shopMsg.t * 2); txt(shopMsg.text, W / 2, oy + 172, 4.6, shopMsg.col, 'center'); ctx.globalAlpha = 1; }
+  else txt('ZC verdienen: Zombie-Kill +10 · Rettung +50 · überlebte Welle +100', W / 2, oy + 172, 3.8, '#999', 'center');
+}
+
 // ---------- Hauptmenü ----------
 function renderMenu() {
   buttons = [];
   const ox = Math.round((W - 320) / 2), oy = Math.round((H - 180) / 2);
   ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, cv.width, cv.height);
   txt('LAST LIGHT', W / 2, oy + 6, 19, '#d83a4a', 'center');
+  {
+    const bx = ox + 248, by = oy + 4, bw = 64, bh = 20, hv = mouse.x >= bx && mouse.x <= bx + bw && mouse.y >= by && mouse.y <= by + bh;
+    const gl = .5 + .5 * Math.sin(performance.now() / 300);
+    box(bx, by, bw, bh, hv ? 'rgba(70,52,10,.95)' : 'rgba(40,30,6,.9)', `rgba(255,207,58,${.6 + .4 * gl})`, 1.5);
+    txt('SHOP', bx + bw / 2, by + 3, 6, '#ffcf3a', 'center');
+    txt(save.zc + ' ZC', bx + bw / 2, by + 12, 4, '#fff', 'center');
+    buttons.push({ x: bx, y: by, w: bw, h: bh, act: () => { sfx.ui(); shopMsg = null; state = 'shop'; } });
+  }
   txt('Du bist der letzte Marine. Hol die Überlebenden raus.', W / 2, oy + 28, 4.2, '#ddd', 'center');
   txt('EINSATZORT', ox + 10, oy + 37, 4.2, '#9fb6c4');
   const hover = (x, y, w, h) => mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h;
@@ -1338,6 +1445,7 @@ function renderMenu() {
     buttons.push({ x, y, w, h, act: () => { selDiff = i; sfx.ui(); } });
   });
   txt(DIFFS[selDiff].desc, W / 2, oy + 124, 3.8, DIFFS[selDiff].col, 'center');
+  txt('Waffe: ' + curWeapon().name + ' · Skin: ' + (SKINS.find(k => k.id === save.skin) || SKINS[0]).name, ox + 312, oy + 99, 3.4, '#ffcf3a', 'right');
   const sx = W / 2 - 60, sy = oy + 134, hv = hover(sx, sy, 120, 17);
   const blink = .6 + .4 * Math.sin(performance.now() / 250);
   box(sx, sy, 120, 17, hv ? 'rgba(120,20,20,.95)' : `rgba(90,15,15,${.7 + .2 * blink})`, '#d83a4a', 1.5);
