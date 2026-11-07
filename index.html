@@ -474,10 +474,27 @@ const LEVELS = [
     }
   },
 ];
+// Exakter Strahl durch das Kachel-Raster (DDA): endet genau an der Wandkante -> gerade Schatten.
+// Trifft der Strahl eine Wand von unten, wird die sichtbare Wandfront (8 px) senkrecht mit beleuchtet.
+const WALL_FACE = 8;
 function castRay(x, y, a, max) {
-  const dx = Math.cos(a), dy = Math.sin(a); let d = 0;
-  while (d < max) { d += 2; if (opaqueAt(x + dx * d, y + dy * d)) { d = Math.min(max, d + 8); break; } }
-  return [x + dx * d, y + dy * d];
+  const dx = Math.cos(a), dy = Math.sin(a);
+  let tx = Math.floor(x / T), ty = Math.floor(y / T);
+  const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+  const tdx = dx !== 0 ? Math.abs(T / dx) : Infinity, tdy = dy !== 0 ? Math.abs(T / dy) : Infinity;
+  let tmx = dx > 0 ? ((tx + 1) * T - x) / dx : dx < 0 ? (tx * T - x) / dx : Infinity;
+  let tmy = dy > 0 ? ((ty + 1) * T - y) / dy : dy < 0 ? (ty * T - y) / dy : Infinity;
+  for (let guard = 0; guard < 200; guard++) {
+    let t, side;
+    if (tmx < tmy) { t = tmx; tmx += tdx; tx += sx; side = 0; } else { t = tmy; tmy += tdy; ty += sy; side = 1; }
+    if (t >= max) break;
+    if (opaqueT(tx, ty)) {
+      const ex = x + dx * t, ey = y + dy * t;
+      if (side === 1 && sy < 0 && grid[ty] && grid[ty][tx] === '#') return [ex, ey - WALL_FACE];
+      return [ex, ey];
+    }
+  }
+  return [x + dx * max, y + dy * max];
 }
 function castPoly(x, y, r, a0, span, n) { const pts = []; for (let i = 0; i <= n; i++) pts.push(castRay(x, y, a0 + span * i / n, r)); return pts; }
 
@@ -487,10 +504,10 @@ function loadLevel(i) {
   for (const L of lights) {
     if (opaqueAt(L.x, L.y)) L.y += 8;
     if (!L.kind) { const r = Math.random(); L.off = r < level.off; L.flicker = !L.off && r < level.off + level.flick; }
-    L.poly = castPoly(L.x, L.y, L.r, 0, Math.PI * 2, 64);
+    L.poly = castPoly(L.x, L.y, L.r, 0, Math.PI * 2, 240);
   }
   const ex = { x: EVAC.x, y: EVAC.y, r: 48, int: .6, rgb: [60, 255, 120], kind: 'exit', ph: 0 };
-  ex.poly = castPoly(EVAC.x, EVAC.y - 2, 48, 0, Math.PI * 2, 48); lights.push(ex);
+  ex.poly = castPoly(EVAC.x, EVAC.y - 2, 48, 0, Math.PI * 2, 160); lights.push(ex);
   computeFlow([START]); reach = new Uint8Array(flow.length); for (let k = 0; k < flow.length; k++) reach[k] = flow[k] >= 0 ? 1 : 0;
   makeLevelSprites(level.survIdx);
   genGround();
@@ -856,7 +873,7 @@ function update(dt) {
       shake = Math.max(shake, 1.2 + w.kick * .3); kick.x -= Math.cos(aim) * w.kick; kick.y -= Math.sin(aim) * w.kick;
       p.x -= Math.cos(aim) * .25 * w.kick; p.y -= Math.sin(aim) * .25 * w.kick; pushOut(p, 4);
       sfx.shot(w);
-      addDyn(p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10, w.flash, [255, 196, 120], 1, .055, 48);
+      addDyn(p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10, w.flash, [255, 196, 120], 1, .055, 160);
       parts.push({ x: p.x, y: p.y - 5, vx: -Math.sin(aim) * 35 * p.face + rnd(-10, 10), vy: rnd(-45, -25), life: .3, col: '#d9b45a', decal: Math.random() < .3, grav: true });
       for (let k = 0; k < 2; k++) parts.push({ x: gx, y: gy, vx: Math.cos(aim) * rnd(8, 20) + rnd(-5, 5), vy: Math.sin(aim) * rnd(8, 20) - rnd(3, 8), life: rnd(.4, .8), max: .8, col: 'smoke' });
       alertNear(p.x, p.y, 170);
@@ -886,7 +903,7 @@ function update(dt) {
         dead = true; const hx = b.x - b.vx * .004, hy = b.y - b.vy * .004;
         for (let k = 0; k < 6; k++) parts.push({ x: hx, y: hy, vx: rnd(-60, 60), vy: rnd(-60, 60), life: rnd(.08, .2), col: Math.random() < .5 ? '#ffe08a' : '#fff' });
         parts.push({ x: hx, y: hy, vx: rnd(-5, 5), vy: rnd(-10, -4), life: .5, max: .5, col: 'smoke' });
-        addDyn(hx, hy, 26, [255, 210, 140], .7, .05, 14); sfx.impact();
+        addDyn(hx, hy, 26, [255, 210, 140], .7, .05, 40); sfx.impact();
         break;
       }
       for (let j = zombies.length - 1; j >= 0; j--) {
@@ -1052,9 +1069,9 @@ function update(dt) {
   // Taschenlampe (Raycast) – mit leichtem Wackeln
   const sway = Math.sin(time * 2.1) * .015 + (p.moving ? Math.sin(time * 9) * .02 : 0);
   const la = aim + sway, lx = p.x + Math.cos(aim) * 6, ly = p.y - 5 + Math.sin(aim) * 6;
-  lightPoly.flash = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 165, la - .44, .88, 60)] : null;
-  lightPoly.inner = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 150, la - .2, .4, 28)] : null;
-  lightPoly.glow = castPoly(p.x, p.y - 4, 38, 0, Math.PI * 2, 32);
+  lightPoly.flash = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 165, la - .44, .88, 150)] : null;
+  lightPoly.inner = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 150, la - .2, .4, 70)] : null;
+  lightPoly.glow = castPoly(p.x, p.y - 4, 38, 0, Math.PI * 2, 96);
   lightPoly.lx = lx; lightPoly.ly = ly; lightPoly.la = la;
 }
 
