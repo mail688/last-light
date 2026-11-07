@@ -17,6 +17,9 @@ You are the last marine in a city overrun by zombies. Fight your way through dar
 - **Everything in one file:** no engine, no libraries, no images. Pure HTML5 Canvas + JavaScript.
 
 ## Controls
+At startup you choose **Computer** (mouse & keyboard) or **Phone/Tablet** (touch controls: left thumb moves, right thumb aims and fires, buttons for melee, reload, flashlight and pause).
+
+**Computer:**
 | Key | Action |
 |---|---|
 | WASD | Move |

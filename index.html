@@ -6,7 +6,7 @@
 <title>Last Light – Zombie Shooter Prototyp</title>
 <style>
   html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
-  canvas{display:block;position:fixed;left:0;top:0;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges;cursor:none}
+  canvas{touch-action:none;-webkit-user-select:none;user-select:none;display:block;position:fixed;left:0;top:0;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges;cursor:none}
 </style>
 </head>
 <body>
@@ -212,6 +212,7 @@ const mouse = { x: W / 2, y: H / 2, down: false, right: false };
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); keys.add(k);
   if (k === 'v') toggleFullscreen();
+  if (state === 'device') { if (k === '1' || k === 'enter') chooseDevice(false); if (k === '2') chooseDevice(true); return; }
   if (state === 'menu') {
     if (k >= '1' && k <= '3') selectLevel(+k - 1);
     if (k === 'arrowleft') { selDiff = Math.max(0, selDiff - 1); sfx.ui(); }
@@ -233,10 +234,63 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mousedown', e => {
   e.preventDefault(); initAudio(); if (ac && ac.state === 'suspended') ac.resume();
-  if (state === 'menu') { menuClick(); return; }
-  if (state === 'over' && overT > 1) { newGame(); return; }
+  if (tapUI()) return;
   if (e.button === 2) mouse.right = true; else mouse.down = true;
 });
+// Klick/Tipp auf Bildschirme ausserhalb des Spiels (Geräteauswahl, Menü, Pause, Game Over)
+function tapUI() {
+  if (state === 'device' || state === 'menu') { menuClick(); return true; }
+  if (paused) { menuClick(); return true; }
+  if (state === 'over') { if (overT > 1 && !menuClick()) newGame(); return true; }
+  return false;
+}
+// ---------- Touch-Steuerung (Handy / Tablet) ----------
+const touch = { mobile: false, move: { id: null }, aim: { id: null }, aimAngle: -Math.PI / 2, meleeTap: false };
+let mobileButtons = [];
+const tpos = t => { const r = cv.getBoundingClientRect(); return { x: (t.clientX - r.left) / r.width * W, y: (t.clientY - r.top) / r.height * H }; };
+cv.addEventListener('touchstart', e => {
+  e.preventDefault(); initAudio(); if (ac && ac.state === 'suspended') ac.resume();
+  for (const t of e.changedTouches) {
+    const q = tpos(t);
+    if (!inPlay() || paused) { mouse.x = q.x; mouse.y = q.y; tapUI(); continue; }
+    if (!touch.mobile) continue;
+    const b = mobileButtons.find(b => Math.hypot(q.x - b.x, q.y - b.y) < b.r + 4);
+    if (b) { b.act(); b.flash = .15; continue; }
+    if (q.x < W / 2 && touch.move.id === null) touch.move = { id: t.identifier, ox: q.x, oy: q.y, dx: 0, dy: 0 };
+    else if (q.x >= W / 2 && touch.aim.id === null) touch.aim = { id: t.identifier, ox: q.x, oy: q.y, dx: 0, dy: 0, mag: 0 };
+  }
+}, { passive: false });
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const q = tpos(t);
+    for (const st of [touch.move, touch.aim]) {
+      if (st.id !== t.identifier) continue;
+      let dx = (q.x - st.ox) / 22, dy = (q.y - st.oy) / 22; const l = Math.hypot(dx, dy);
+      if (l > 1) { st.ox = q.x - dx / l * 22; st.oy = q.y - dy / l * 22; dx /= l; dy /= l; }   // Stick zieht mit
+      st.dx = dx; st.dy = dy; st.mag = Math.min(1, l);
+      if (st === touch.aim && st.mag > .15) touch.aimAngle = Math.atan2(dy, dx);
+    }
+  }
+}, { passive: false });
+function touchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (touch.move.id === t.identifier) touch.move = { id: null };
+    if (touch.aim.id === t.identifier) touch.aim = { id: null };
+  }
+}
+cv.addEventListener('touchend', touchEnd, { passive: false });
+cv.addEventListener('touchcancel', touchEnd, { passive: false });
+const isTouchDevice = () => matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+function chooseDevice(mobile) {
+  touch.mobile = mobile; sfx.ui();
+  try { localStorage.setItem('lastlight_device', mobile ? 'mobile' : 'pc'); } catch (e) { }
+  if (mobile) {
+    try { if (!document.fullscreenElement) document.documentElement.requestFullscreen().then(() => { try { screen.orientation.lock('landscape').catch(() => { }); } catch (e) { } }).catch(() => { }); } catch (e) { }
+  }
+  state = 'menu';
+}
 addEventListener('mouseup', e => { if (e.button === 2) mouse.right = false; else mouse.down = false; });
 cv.addEventListener('contextmenu', e => e.preventDefault());
 const inPlay = () => state === 'play' || state === 'inter';
@@ -583,7 +637,7 @@ function getBest(l, d) { try { return +localStorage.getItem(`lastlight3_${l}_${d
 // =====================================================================
 //  SPIELZUSTAND
 // =====================================================================
-let state = 'menu', paused = false, overT = 0;
+let state = 'device', paused = false, overT = 0;
 let player = null, zombies = [], survivors = [], bullets = [], parts = [], floats = [], trail = [], pickups = [], dyn = [], motes = [];
 let wave, toSpawn, spawnT, score, rescued, lost, kills, waveRescued, interT, shake, msg, time = 0;
 let flowT = 0, groanT = 2, heartT = 0, stepT = 0, joinCounter = 0, zstepT = 0;
@@ -592,7 +646,7 @@ let buttons = [];
 let lightPoly = { flash: null, inner: null, glow: null };
 
 function selectLevel(i) { if (i === selLevel && level) return; selLevel = i; loadLevel(i); sfx.ui(); }
-function toMenu() { state = 'menu'; paused = false; mouse.down = false; loadLevel(selLevel); }
+function toMenu() { state = 'menu'; touch.move = { id: null }; touch.aim = { id: null }; paused = false; mouse.down = false; loadLevel(selLevel); }
 function newGame() {
   diff = DIFFS[selDiff];
   loadLevel(selLevel); startAmbient();
@@ -712,15 +766,29 @@ function update(dt) {
   if (keys.has('d') || keys.has('arrowright')) ax++;
   if (keys.has('w') || keys.has('arrowup')) ay--;
   if (keys.has('s') || keys.has('arrowdown')) ay++;
-  const al = Math.hypot(ax, ay); p.moving = al > 0;
+  if (touch.mobile && touch.move.id !== null) { ax += touch.move.dx; ay += touch.move.dy; }
+  const al = Math.hypot(ax, ay), amag = Math.min(1, al); p.moving = al > .12;
   const spd = 60 * (p.reload > 0 ? .8 : 1);
-  if (al) { p.x += ax / al * spd * dt; p.y += ay / al * spd * dt; p.anim += dt * 8; stepT -= dt; if (stepT <= 0) { sfx.step(); stepT = .34; } }
+  if (p.moving) { p.x += ax / al * spd * amag * dt; p.y += ay / al * spd * amag * dt; p.anim += dt * 8; stepT -= dt; if (stepT <= 0) { sfx.step(); stepT = .34; } }
   pushOut(p, 4);
   const lt = trail[trail.length - 1];
   if (!lt || Math.hypot(lt.x - p.x, lt.y - p.y) >= 2) { trail.push({ x: p.x, y: p.y }); if (trail.length > 800) trail.splice(0, 200); }
 
   // Zielen & Schiessen
-  const aim = Math.atan2(mouse.y + cam.y - (p.y - 5), mouse.x + cam.x - p.x);
+  let aim = touch.mobile ? touch.aimAngle : Math.atan2(mouse.y + cam.y - (p.y - 5), mouse.x + cam.x - p.x);
+  if (touch.mobile) {
+    mouse.down = touch.aim.id !== null && touch.aim.mag > .35;        // Stick weit gedrückt = Feuer
+    if (mouse.down) {                                                  // leichte Zielhilfe am Handy
+      let bestA = .26, bz = null;
+      for (const z of zombies) {
+        const d = Math.hypot(z.x - p.x, z.y - 5 - (p.y - 5)); if (d > 170) continue;
+        const da = Math.abs(angDiff(Math.atan2(z.y - p.y, z.x - p.x), aim)); if (da >= bestA) continue;
+        let blocked = false; for (let k = 8; k < d; k += 8) if (opaqueAt(p.x + (z.x - p.x) * k / d, p.y + (z.y - p.y) * k / d)) { blocked = true; break; }
+        if (!blocked) { bestA = da; bz = z; }
+      }
+      if (bz) aim = Math.atan2(bz.y - 5 - (p.y - 5), bz.x - p.x);
+    }
+  }
   p.aim = aim; p.face = Math.cos(aim) < 0 ? -1 : 1;
   p.cool -= dt; p.muzzle -= dt; p.inv -= dt; p.melee -= dt; p.swing -= dt;
   p.spread = Math.max(0, p.spread - dt * .25);
@@ -741,7 +809,7 @@ function update(dt) {
     } else { sfx.dry(); p.cool = .3; tryReload(); }
   }
   // Kolbenschlag (Rechtsklick)
-  if (mouse.right && p.melee <= 0) {
+  if ((mouse.right || touch.meleeTap) && p.melee <= 0) {
     p.melee = .55; p.swing = .15; sfx.melee();
     for (const z of zombies) {
       const d = dist(z, p);
@@ -918,8 +986,11 @@ function update(dt) {
     try { if (score > (+localStorage.getItem(bestKey()) || 0)) localStorage.setItem(bestKey(), score); } catch (e) { }
   }
 
-  cam.x = clamp(p.x - W / 2 + (mouse.x - W / 2) * .35, 0, WW - W);
-  cam.y = clamp(p.y - H / 2 + (mouse.y - H / 2) * .35, 0, WH - H);
+  touch.meleeTap = false;
+  const lookX = touch.mobile ? Math.cos(aim) * (touch.aim.id !== null ? 40 : 22) : (mouse.x - W / 2) * .35;
+  const lookY = touch.mobile ? Math.sin(aim) * (touch.aim.id !== null ? 28 : 15) : (mouse.y - H / 2) * .35;
+  cam.x += (clamp(p.x - W / 2 + lookX, 0, WW - W) - cam.x) * (touch.mobile ? Math.min(1, dt * 8) : 1);
+  cam.y += (clamp(p.y - H / 2 + lookY, 0, WH - H) - cam.y) * (touch.mobile ? Math.min(1, dt * 8) : 1);
 
   // Taschenlampe (Raycast) – mit leichtem Wackeln
   const sway = Math.sin(time * 2.1) * .015 + (p.moving ? Math.sin(time * 9) * .02 : 0);
@@ -982,6 +1053,7 @@ function edgeArrow(tx, ty, col) {
   g.lineTo(px + Math.cos(a + 2.4) * 3.5, py + Math.sin(a + 2.4) * 3.5); g.lineTo(px + Math.cos(a - 2.4) * 3.5, py + Math.sin(a - 2.4) * 3.5); g.fill();
 }
 function txt(s, x, y, size, col, align = 'left') {
+  if (touch.mobile && size < 5) size = Math.min(5, size * 1.25);
   ctx.font = `bold ${Math.round(size * scale)}px Consolas, "Lucida Console", "Courier New", monospace`;
   ctx.textAlign = align; ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillText(s, x * scale + Math.max(1, scale * .5), y * scale + Math.max(1, scale * .5));
@@ -1001,7 +1073,7 @@ const lightLevel = L => {
 };
 
 function render() {
-  const inGame = state !== 'menu';
+  const inGame = state !== 'menu' && state !== 'device';
   if (!inGame) {
     time += 1 / 60;
     cam.x = clamp(WW / 2 - W / 2 + Math.sin(time * .12) * 300, 0, WW - W);
@@ -1115,14 +1187,18 @@ function render() {
     for (let i = 0; i < player.maxHp; i++) g.drawImage(i < player.hp ? heartFull : heartEmpty, 3 + i * 9, 3);
     for (let i = 0; i < player.magMax; i++) { g.fillStyle = i < player.mag ? '#d9b45a' : '#3a3528'; g.fillRect(W - 4 - i * 3, H - 8, 2, 5); }
   }
+  if (!touch.mobile && !(state === 'device' && isTouchDevice())) {
   const mx = Math.round(mouse.x), my = Math.round(mouse.y);
   const gap = inGame ? 2 + Math.round((player.spread || 0) * 25) : 2;
   g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(mx - gap - 3, my, 3, 1); g.fillRect(mx + gap + 1, my, 3, 1); g.fillRect(mx, my - gap - 3, 1, 3); g.fillRect(mx, my + gap + 1, 1, 3);
   g.fillStyle = '#e8fff0'; g.fillRect(mx - gap - 2, my, 2, 1); g.fillRect(mx + gap + 1, my, 2, 1); g.fillRect(mx, my - gap - 2, 1, 2); g.fillRect(mx, my + gap + 1, 1, 2);
   if (!inGame) { g.fillStyle = '#e8fff0'; g.fillRect(mx, my, 1, 1); }
+  }
 
   ctx.drawImage(low, 0, 0, cv.width, cv.height);
-  if (state === 'menu') { renderMenu(); return; }
+  buttons = [];
+  if (state === 'device') { renderDevice(); return; }
+  if (state === 'menu') { renderMenu(); renderRotateHint(); return; }
   txt('EXIT', EVAC.x - cx, EVAC.y - cy - 32, 4.5, '#6dff8a', 'center');
 
   txt('WELLE ' + wave, 3, 11, 4.8, '#ffd34d');
@@ -1131,14 +1207,17 @@ function render() {
   const waiting = survivors.filter(s => s.state === 'wait').length, foll = survivors.length - waiting;
   txt(`Wartend ${waiting} · Folgen ${foll} · Gerettet ${rescued} · Zombies ${zombies.length + toSpawn}`, W / 2, 3, 4, '#cfcfcf', 'center');
   txt(player.reload > 0 ? 'NACHLADEN…' : `${player.mag} / ${player.reserve}`, W - 3, H - 16, 4.6, player.mag === 0 ? '#ff6060' : player.reserve < 30 ? '#ff9a40' : '#d9b45a', 'right');
-  if (!player.lamp) txt('Lampe AUS (F)', 3, H - 9, 4, '#888');
+  if (!player.lamp) txt(touch.mobile ? 'Lampe AUS' : 'Lampe AUS (F)', 3, touch.mobile ? 26 : H - 9, 4, '#888');
+  if (touch.mobile && state !== 'over' && !paused) renderTouchControls();
   for (const f of floats) txt(f.text, f.x - cam.x, f.y - cam.y, 4, f.col, 'center');
   if (msg) { ctx.globalAlpha = Math.min(1, msg.t * 2); txt(msg.text, W / 2, 24, 5.5, msg.col, 'center'); ctx.globalAlpha = 1; }
   if (state === 'inter') txt('Nächste Welle in ' + Math.ceil(interT) + '…', W / 2, 33, 4.6, '#ccc', 'center');
   if (paused) {
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, cv.width, cv.height);
-    txt('PAUSE', W / 2, H / 2 - 18, 14, '#fff', 'center');
-    txt('P weiter · M Hauptmenü', W / 2, H / 2 + 2, 5, '#bbb', 'center');
+    txt('PAUSE', W / 2, H / 2 - 30, 14, '#fff', 'center');
+    uiButton(W / 2 - 50, H / 2 - 6, 100, 15, 'WEITER', () => { paused = false; sfx.ui(); }, '#6dff8a');
+    uiButton(W / 2 - 50, H / 2 + 14, 100, 15, 'HAUPTMENÜ', () => { sfx.ui(); toMenu(); }, '#d83a4a');
+    if (!touch.mobile) txt('P = weiter · M = Hauptmenü', W / 2, H / 2 + 36, 4, '#999', 'center');
   }
   if (state === 'over') {
     ctx.fillStyle = 'rgba(40,0,0,.6)'; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -1147,8 +1226,79 @@ function render() {
     txt(`Welle ${wave} · ${score} Punkte · ${rescued} gerettet · ${kills} Zombies`, W / 2, 72, 5, '#eee', 'center');
     const b = getBest(levelIdx, DIFFS.indexOf(diff));
     txt(score >= b && score > 0 ? 'NEUER REKORD!' : 'Rekord: ' + b, W / 2, 84, 5, '#ffd34d', 'center');
-    if (overT > 1 && Math.floor(performance.now() / 500) % 2) txt('KLICKEN = NOCHMAL   ·   M = MENÜ', W / 2, 110, 6, '#fff', 'center');
+    if (overT > 1) {
+      uiButton(W / 2 - 105, 100, 100, 16, 'NOCHMAL', () => newGame(), '#6dff8a');
+      uiButton(W / 2 + 5, 100, 100, 16, 'HAUPTMENÜ', () => { sfx.ui(); toMenu(); }, '#d83a4a');
+    }
   }
+  renderRotateHint();
+}
+
+// ---------- Bedienelemente ----------
+function uiButton(x, y, w, h, label, act, col = '#ccc') {
+  const hv = !touch.mobile && mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h;
+  box(x, y, w, h, hv ? 'rgba(40,40,40,.95)' : 'rgba(14,14,14,.88)', col, 1.5);
+  txt(label, x + w / 2, y + h / 2 - 3, 6, '#fff', 'center');
+  buttons.push({ x, y, w, h, act });
+}
+function circle(x, y, r, fill, stroke, lw = 1) {
+  ctx.beginPath(); ctx.arc(x * scale, y * scale, r * scale, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw * Math.max(1, scale / 2); ctx.stroke(); }
+}
+function renderTouchControls() {
+  // Bewegungs-Stick (links)
+  const mv = touch.move, am = touch.aim;
+  const mbx = mv.id !== null ? mv.ox : 38, mby = mv.id !== null ? mv.oy : H - 38;
+  circle(mbx, mby, 22, 'rgba(255,255,255,.06)', 'rgba(255,255,255,.25)');
+  circle(mbx + (mv.dx || 0) * 22, mby + (mv.dy || 0) * 22, 9, 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
+  if (mv.id === null) txt('BEWEGEN', mbx, mby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
+  // Ziel-/Feuer-Stick (rechts)
+  const abx = am.id !== null ? am.ox : W - 40, aby = am.id !== null ? am.oy : H - 40;
+  const firing = am.id !== null && am.mag > .35;
+  circle(abx, aby, 22, firing ? 'rgba(255,60,40,.12)' : 'rgba(255,255,255,.06)', firing ? 'rgba(255,90,60,.6)' : 'rgba(255,255,255,.25)');
+  circle(abx + (am.dx || 0) * 22, aby + (am.dy || 0) * 22, 9, firing ? 'rgba(255,80,50,.4)' : 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
+  if (am.id === null) txt('ZIELEN+FEUER', abx, aby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
+  // Knöpfe
+  mobileButtons = [
+    { x: W - 96, y: H - 24, r: 10, label: 'SCHLAG', act: () => { touch.meleeTap = true; } },
+    { x: W - 86, y: H - 56, r: 9, label: 'R', act: () => tryReload() },
+    { x: W - 58, y: H - 78, r: 8, label: 'LICHT', act: () => { player.lamp = !player.lamp; sfx.flick(); } },
+    { x: W - 12, y: 24, r: 7, label: 'II', act: () => { paused = true; sfx.ui(); } },
+  ];
+  for (const b of mobileButtons) {
+    circle(b.x, b.y, b.r, 'rgba(10,12,14,.55)', 'rgba(255,255,255,.35)');
+    txt(b.label, b.x, b.y - 2.2, b.label.length > 2 ? 3.4 : 5, '#eee', 'center');
+  }
+}
+function renderRotateHint() {
+  if (!touch.mobile || innerHeight <= innerWidth) return;
+  ctx.fillStyle = 'rgba(0,0,0,.88)'; ctx.fillRect(0, 0, cv.width, cv.height);
+  txt('BITTE HANDY', W / 2, H / 2 - 20, 12, '#fff', 'center');
+  txt('QUER HALTEN', W / 2, H / 2 - 4, 12, '#fff', 'center');
+  txt('Das Spiel läuft im Querformat.', W / 2, H / 2 + 16, 5, '#aaa', 'center');
+}
+function renderDevice() {
+  const ox = Math.round((W - 320) / 2), oy = Math.round((H - 180) / 2);
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, cv.width, cv.height);
+  txt('LAST LIGHT', W / 2, oy + 14, 19, '#d83a4a', 'center');
+  txt('WIE SPIELST DU?', W / 2, oy + 46, 7, '#fff', 'center');
+  const rec = isTouchDevice() ? 1 : 0;
+  [['COMPUTER', 'Maus & Tastatur', '[1]'], ['HANDY / TABLET', 'Touch-Steuerung', '[2]']].forEach(([t, d, k], i) => {
+    const x = ox + 30 + i * 136, y = oy + 64, w = 124, h = 70;
+    const hv = mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h;
+    box(x, y, w, h, hv ? 'rgba(40,55,48,.92)' : 'rgba(14,16,18,.88)', i === rec ? '#6dff8a' : hv ? '#aaa' : '#555', i === rec ? 1.5 : 1);
+    // kleines Symbol
+    ctx.strokeStyle = '#cfd8d6'; ctx.lineWidth = Math.max(1, scale * .8);
+    if (i === 0) { ctx.strokeRect((x + 46) * scale, (y + 8) * scale, 32 * scale, 20 * scale); ctx.strokeRect((x + 40) * scale, (y + 30) * scale, 44 * scale, 4 * scale); }
+    else { ctx.strokeRect((x + 44) * scale, (y + 10) * scale, 36 * scale, 20 * scale); circle(x + 50, y + 20, 2.5, null, '#cfd8d6'); circle(x + 74, y + 20, 2.5, null, '#cfd8d6'); }
+    txt(t, x + w / 2, y + 40, 6, '#fff', 'center');
+    txt(d, x + w / 2, y + 50, 4.2, '#aaa', 'center');
+    txt(i === rec ? 'EMPFOHLEN' : (touch.mobile ? '' : k), x + w / 2, y + 59, 3.6, i === rec ? '#6dff8a' : '#777', 'center');
+    buttons.push({ x, y, w, h, act: () => chooseDevice(i === 1) });
+  });
+  txt('Du kannst das später im Hauptmenü ändern.', W / 2, oy + 146, 4, '#888', 'center');
+  renderRotateHint();
 }
 
 // ---------- Hauptmenü ----------
@@ -1189,16 +1339,25 @@ function renderMenu() {
   box(fx, fy, 70, fh, hover(fx, fy, 70, fh) ? 'rgba(30,30,30,.9)' : 'rgba(12,12,12,.8)', '#555');
   txt(fsel ? 'FENSTER (V)' : 'VOLLBILD (V)', fx + 35, fy + 3.5, 3.8, '#ccc', 'center');
   buttons.push({ x: fx, y: fy, w: 70, h: fh, act: () => { sfx.ui(); toggleFullscreen(); } });
+  const dx2 = ox + 10, dy2 = fy + 13;
+  box(dx2, dy2, 70, fh, hover(dx2, dy2, 70, fh) ? 'rgba(30,30,30,.9)' : 'rgba(12,12,12,.8)', '#555');
+  txt(touch.mobile ? 'STEUERUNG: HANDY' : 'STEUERUNG: PC', dx2 + 35, dy2 + 3.5, 3.6, '#ccc', 'center');
+  buttons.push({ x: dx2, y: dy2, w: 70, h: fh, act: () => { sfx.ui(); state = 'device'; } });
   if (APP) {
     const qx = ox + 240, qy = fy;
     box(qx, qy, 70, fh, hover(qx, qy, 70, fh) ? 'rgba(60,20,20,.9)' : 'rgba(12,12,12,.8)', '#555');
     txt('BEENDEN', qx + 35, qy + 3.5, 3.8, '#ccc', 'center');
     buttons.push({ x: qx, y: qy, w: 70, h: fh, act: () => { try { window.close(); } catch (e) { } } });
   }
-  txt('WASD bewegen · Maus zielen · Linksklick schiessen · Rechtsklick Kolbenschlag', W / 2, oy + 158, 3.4, '#999', 'center');
-  txt('R nachladen · F Taschenlampe · P Pause · V Vollbild · Schüsse locken Zombies an!', W / 2, oy + 165, 3.4, '#999', 'center');
+  if (touch.mobile) {
+    txt('Linker Daumen: bewegen · Rechter Daumen: zielen (weit ziehen = Feuer)', W / 2 + 40, oy + 160, 3.4, '#999', 'center');
+    txt('Knöpfe: SCHLAG · R nachladen · LICHT · II Pause', W / 2 + 40, oy + 167, 3.4, '#999', 'center');
+  } else {
+    txt('WASD bewegen · Maus zielen · Linksklick schiessen · Rechtsklick Kolbenschlag', W / 2 + 40, oy + 160, 3.4, '#999', 'center');
+    txt('R nachladen · F Taschenlampe · P Pause · V Vollbild · Schüsse locken Zombies an!', W / 2 + 40, oy + 167, 3.4, '#999', 'center');
+  }
 }
-function menuClick() { for (const b of buttons) if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) { b.act(); return; } }
+function menuClick() { for (const b of buttons) if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) { b.act(); return true; } return false; }
 
 // =====================================================================
 //  GAME LOOP
