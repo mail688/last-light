@@ -2,7 +2,7 @@
 
 You are the last marine in a city overrun by zombies. Fight your way through dark hospitals, labs and parking garages, find the survivors and lead them to the exit alive.
 
-**▶ Play in your browser:** https://mail688.github.io/last-light/
+**▶ Play in your browser:** https://last-light.js.org/
 
 ![Gameplay](screenshots/gameplay_hospital.png)
 
