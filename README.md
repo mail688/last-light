@@ -2,7 +2,7 @@
 
 You are the last marine in a city overrun by zombies. Fight your way through dark hospitals, labs and parking garages, find the survivors and lead them to the exit alive.
 
-**▶ Play in your browser:** https://last-light.js.org/
+**▶ Play in your browser:** https://mail688.github.io/last-light/
 
 ![Gameplay](screenshots/gameplay_hospital.png)
 
@@ -33,6 +33,7 @@ At startup you choose **Computer** (mouse & keyboard) or **Phone/Tablet** (touch
 | V | Fullscreen |
 
 ## Running it
+- **Phone app (PWA):** open the game link in Safari (iPhone) or Chrome (Android) and choose *Add to Home Screen*. It then starts fullscreen with its own icon and also works offline.
 - **Browser:** open `index.html`, or use the GitHub Pages link above
 - **Windows app:** `launcher/` contains a small Go program that bundles the game into an `.exe` and opens it in its own fullscreen window (`GOOS=windows go build -ldflags "-H=windowsgui" -o "Last Light.exe"`, with `index.html` copied into `launcher/game/` first)
 
