@@ -475,11 +475,14 @@ const LEVELS = [
   },
 ];
 // Exakter Strahl durch das Kachel-Raster (DDA): endet genau an der Wandkante -> gerade Schatten.
-// Trifft der Strahl eine Wand von unten, wird die sichtbare Wandfront (8 px) senkrecht mit beleuchtet.
+// Trifft der Strahl eine Wand von unten, läuft er auf der sichtbaren Wandfront (unterste 8 px) weiter
+// bis zu deren Oberkante – so wird die Front sauber und ohne Keile beleuchtet.
 const WALL_FACE = 8;
+const hasFace = (tx, ty) => tx >= 0 && tx < MW && ty >= 0 && ty < MH && grid[ty][tx] === '#' && !opaqueT(tx, ty + 1);
 function castRay(x, y, a, max) {
   const dx = Math.cos(a), dy = Math.sin(a);
   let tx = Math.floor(x / T), ty = Math.floor(y / T);
+  if (opaqueT(tx, ty)) return [x, y];                       // Ursprung in der Wand -> kein Licht
   const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
   const tdx = dx !== 0 ? Math.abs(T / dx) : Infinity, tdy = dy !== 0 ? Math.abs(T / dy) : Infinity;
   let tmx = dx > 0 ? ((tx + 1) * T - x) / dx : dx < 0 ? (tx * T - x) / dx : Infinity;
@@ -489,12 +492,22 @@ function castRay(x, y, a, max) {
     if (tmx < tmy) { t = tmx; tmx += tdx; tx += sx; side = 0; } else { t = tmy; tmy += tdy; ty += sy; side = 1; }
     if (t >= max) break;
     if (opaqueT(tx, ty)) {
-      const ex = x + dx * t, ey = y + dy * t;
-      if (side === 1 && sy < 0 && grid[ty] && grid[ty][tx] === '#') return [ex, ey - WALL_FACE];
-      return [ex, ey];
+      if (side === 1 && sy < 0 && hasFace(tx, ty)) {
+        let t2 = Math.min(max, (ty * T + T - WALL_FACE - y) / dy);  // Oberkante der Wandfront
+        let col = tx, tc = tmx;                                    // seitlich nur über weitere Wandfronten
+        while (tc < t2) { const nx = col + sx; if (!hasFace(nx, ty)) { t2 = tc; break; } col = nx; tc += tdx; }
+        return [x + dx * t2, y + dy * t2];
+      }
+      return [x + dx * t, y + dy * t];
     }
   }
   return [x + dx * max, y + dy * max];
+}
+// Lichtursprung sicher im freien Raum: vom Körper zur Waffe, aber nie in eine Wand hinein
+function safeOrigin(p, tx, ty) {
+  let ox = p.x, oy = p.y - 3; const n = Math.ceil(Math.hypot(tx - ox, ty - oy));
+  for (let i = 1; i <= n; i++) { const nx = p.x + (tx - p.x) * i / n, ny = p.y - 3 + (ty - p.y + 3) * i / n; if (opaqueAt(nx, ny)) break; ox = nx; oy = ny; }
+  return [ox, oy];
 }
 function castPoly(x, y, r, a0, span, n) { const pts = []; for (let i = 0; i <= n; i++) pts.push(castRay(x, y, a0 + span * i / n, r)); return pts; }
 
@@ -873,7 +886,7 @@ function update(dt) {
       shake = Math.max(shake, 1.2 + w.kick * .3); kick.x -= Math.cos(aim) * w.kick; kick.y -= Math.sin(aim) * w.kick;
       p.x -= Math.cos(aim) * .25 * w.kick; p.y -= Math.sin(aim) * .25 * w.kick; pushOut(p, 4);
       sfx.shot(w);
-      addDyn(p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10, w.flash, [255, 196, 120], 1, .055, 160);
+      { const [mx2, my2] = safeOrigin(p, p.x + Math.cos(aim) * 10, p.y - 5 + Math.sin(aim) * 10); addDyn(mx2, my2, w.flash, [255, 196, 120], 1, .055, 160); }
       parts.push({ x: p.x, y: p.y - 5, vx: -Math.sin(aim) * 35 * p.face + rnd(-10, 10), vy: rnd(-45, -25), life: .3, col: '#d9b45a', decal: Math.random() < .3, grav: true });
       for (let k = 0; k < 2; k++) parts.push({ x: gx, y: gy, vx: Math.cos(aim) * rnd(8, 20) + rnd(-5, 5), vy: Math.sin(aim) * rnd(8, 20) - rnd(3, 8), life: rnd(.4, .8), max: .8, col: 'smoke' });
       alertNear(p.x, p.y, 170);
@@ -1068,10 +1081,10 @@ function update(dt) {
 
   // Taschenlampe (Raycast) – mit leichtem Wackeln
   const sway = Math.sin(time * 2.1) * .015 + (p.moving ? Math.sin(time * 9) * .02 : 0);
-  const la = aim + sway, lx = p.x + Math.cos(aim) * 6, ly = p.y - 5 + Math.sin(aim) * 6;
+  const la = aim + sway, [lx, ly] = safeOrigin(p, p.x + Math.cos(aim) * 6, p.y - 5 + Math.sin(aim) * 6);
   lightPoly.flash = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 165, la - .44, .88, 150)] : null;
   lightPoly.inner = p.lamp ? [[lx, ly], ...castPoly(lx, ly, 150, la - .2, .4, 70)] : null;
-  lightPoly.glow = castPoly(p.x, p.y - 4, 38, 0, Math.PI * 2, 96);
+  lightPoly.glow = castPoly(p.x, p.y - 3, 38, 0, Math.PI * 2, 96);
   lightPoly.lx = lx; lightPoly.ly = ly; lightPoly.la = la;
 }
 
@@ -1110,11 +1123,13 @@ function polyPath(c, pts, cx, cy) {
   for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0] - cx, pts[i][1] - cy);
   c.closePath();
 }
-function addLightTo(c, pts, x, y, r, rgb, inten, cx, cy, mid = .45) {
+function addLightTo(c, pts, x, y, r, rgb, inten, cx, cy, mid = .45, soft = 0) {
   const sx = x - cx, sy = y - cy;
   if (sx < -r || sy < -r || sx > W + r || sy > H + r || inten <= 0) return;
-  const gr = c.createRadialGradient(sx, sy, 0, sx, sy, r);
-  gr.addColorStop(0, rgba(rgb, Math.min(1, inten))); gr.addColorStop(mid, rgba(rgb, Math.min(1, inten) * .42)); gr.addColorStop(1, rgba(rgb, 0));
+  const gr = c.createRadialGradient(sx, sy, 0, sx, sy, r), I = Math.min(1, inten);
+  if (soft) { gr.addColorStop(0, rgba(rgb, I * .35)); gr.addColorStop(soft, rgba(rgb, I)); }
+  else gr.addColorStop(0, rgba(rgb, I));
+  gr.addColorStop(Math.max(mid, soft + .01), rgba(rgb, I * .42)); gr.addColorStop(1, rgba(rgb, 0));
   c.fillStyle = gr; polyPath(c, pts, cx, cy); c.fill();
 }
 function edgeArrow(tx, ty, col) {
@@ -1205,7 +1220,7 @@ function render() {
     const p = player;
     if (lightPoly.flash) {
       addLightTo(lmc, lightPoly.flash, lightPoly.lx, lightPoly.ly, 165, [255, 238, 214], .9, cx, cy, .35);
-      addLightTo(lmc, lightPoly.inner, lightPoly.lx, lightPoly.ly, 150, [255, 245, 230], .45, cx, cy, .3);
+      addLightTo(lmc, lightPoly.inner, lightPoly.lx, lightPoly.ly, 150, [255, 245, 230], .45, cx, cy, .3, .1);
     }
     addLightTo(lmc, lightPoly.glow, p.x, p.y - 4, 38, [170, 190, 210], .32, cx, cy);
   }
@@ -1217,7 +1232,7 @@ function render() {
   // ---------- Glanz / Bloom ----------
   g.globalCompositeOperation = 'lighter';
   if (alive && lightPoly.flash) {
-    addLightTo(g, lightPoly.inner, lightPoly.lx, lightPoly.ly, 120, [255, 230, 190], .07, cx, cy, .2);
+    addLightTo(g, lightPoly.inner, lightPoly.lx, lightPoly.ly, 120, [255, 230, 190], .06, cx, cy, .35, .15);
     for (const m of motes) {                                   // Staub im Lichtkegel
       const dx = m.x - lightPoly.lx, dy = m.y - lightPoly.ly, d = Math.hypot(dx, dy);
       if (d > 140 || d < 6 || Math.abs(angDiff(Math.atan2(dy, dx), lightPoly.la)) > .4 || opaqueAt(m.x, m.y)) continue;
