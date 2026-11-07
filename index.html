@@ -245,6 +245,7 @@ function tapUI() {
   return false;
 }
 // ---------- Touch-Steuerung (Handy / Tablet) ----------
+const MOVE_R = 22, AIM_R = 30;              // Stick-Grössen (rechter Stick grösser)
 const touch = { mobile: false, move: { id: null }, aim: { id: null }, aimAngle: -Math.PI / 2, meleeTap: false };
 let mobileButtons = [];
 const tpos = t => { const r = cv.getBoundingClientRect(); return { x: (t.clientX - r.left) / r.width * W, y: (t.clientY - r.top) / r.height * H }; };
@@ -266,8 +267,9 @@ cv.addEventListener('touchmove', e => {
     const q = tpos(t);
     for (const st of [touch.move, touch.aim]) {
       if (st.id !== t.identifier) continue;
-      let dx = (q.x - st.ox) / 22, dy = (q.y - st.oy) / 22; const l = Math.hypot(dx, dy);
-      if (l > 1) { st.ox = q.x - dx / l * 22; st.oy = q.y - dy / l * 22; dx /= l; dy /= l; }   // Stick zieht mit
+      const SR = st === touch.aim ? AIM_R : MOVE_R;
+      let dx = (q.x - st.ox) / SR, dy = (q.y - st.oy) / SR; const l = Math.hypot(dx, dy);
+      if (l > 1) { st.ox = q.x - dx / l * SR; st.oy = q.y - dy / l * SR; dx /= l; dy /= l; }   // Stick zieht mit
       st.dx = dx; st.dy = dy; st.mag = Math.min(1, l);
       if (st === touch.aim && st.mag > .15) touch.aimAngle = Math.atan2(dy, dx);
     }
@@ -1258,19 +1260,19 @@ function renderTouchControls() {
   circle(mbx + (mv.dx || 0) * 22, mby + (mv.dy || 0) * 22, 9, 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
   if (mv.id === null) txt('BEWEGEN', mbx, mby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
   // Ziel-/Feuer-Stick (rechts)
-  const abx = am.id !== null ? am.ox : W - 40, aby = am.id !== null ? am.oy : H - 40;
+  const abx = am.id !== null ? am.ox : W - 48, aby = am.id !== null ? am.oy : H - 48;
   const firing = am.id !== null && touch.firing;
-  circle(abx, aby, 22, firing ? 'rgba(255,60,40,.12)' : 'rgba(255,255,255,.06)', firing ? 'rgba(255,90,60,.6)' : 'rgba(255,255,255,.25)');
-  circle(abx, aby, 22 * .88, null, firing ? 'rgba(255,90,60,.5)' : 'rgba(255,170,60,.28)', .6);   // Feuer-Grenze
-  circle(abx + (am.dx || 0) * 22, aby + (am.dy || 0) * 22, 9, firing ? 'rgba(255,80,50,.4)' : 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
-  if (am.id === null) txt('ZIELEN · RAND = FEUER', abx - 6, aby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
-  else if (!firing) txt('ZIELEN', abx, aby - 31, 3.6, 'rgba(255,255,255,.55)', 'center');
-  else txt('FEUER', abx, aby - 31, 3.6, 'rgba(255,110,80,.9)', 'center');
+  circle(abx, aby, AIM_R, firing ? 'rgba(255,60,40,.12)' : 'rgba(255,255,255,.06)', firing ? 'rgba(255,90,60,.6)' : 'rgba(255,255,255,.25)');
+  circle(abx, aby, AIM_R * .88, null, firing ? 'rgba(255,90,60,.5)' : 'rgba(255,170,60,.28)', .6);   // Feuer-Grenze
+  circle(abx + (am.dx || 0) * AIM_R, aby + (am.dy || 0) * AIM_R, 12, firing ? 'rgba(255,80,50,.4)' : 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
+  if (am.id === null) txt('ZIELEN · RAND = FEUER', abx - 10, aby + 33, 3.6, 'rgba(255,255,255,.45)', 'center');
+  else if (!firing) txt('ZIELEN', abx, aby - 39, 3.6, 'rgba(255,255,255,.55)', 'center');
+  else txt('FEUER', abx, aby - 39, 3.6, 'rgba(255,110,80,.9)', 'center');
   // Knöpfe
   mobileButtons = [
-    { x: W - 96, y: H - 24, r: 10, label: 'SCHLAG', act: () => { touch.meleeTap = true; } },
-    { x: W - 86, y: H - 56, r: 9, label: 'R', act: () => tryReload() },
-    { x: W - 58, y: H - 78, r: 8, label: 'LICHT', act: () => { player.lamp = !player.lamp; sfx.flick(); } },
+    { x: W - 106, y: H - 22, r: 10, label: 'SCHLAG', act: () => { touch.meleeTap = true; } },
+    { x: W - 102, y: H - 62, r: 9, label: 'R', act: () => tryReload() },
+    { x: W - 70, y: H - 94, r: 8, label: 'LICHT', act: () => { player.lamp = !player.lamp; sfx.flick(); } },
     { x: W - 12, y: 24, r: 7, label: 'II', act: () => { paused = true; sfx.ui(); } },
   ];
   for (const b of mobileButtons) {
