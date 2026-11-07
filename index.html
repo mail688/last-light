@@ -777,7 +777,11 @@ function update(dt) {
   // Zielen & Schiessen
   let aim = touch.mobile ? touch.aimAngle : Math.atan2(mouse.y + cam.y - (p.y - 5), mouse.x + cam.x - p.x);
   if (touch.mobile) {
-    mouse.down = touch.aim.id !== null && touch.aim.mag > .35;        // Stick weit gedrückt = Feuer
+    // Feuer erst am Rand des Sticks (ab 88 %), aufhören erst unter 75 % – verhindert Flackern
+    if (touch.aim.id === null) touch.firing = false;
+    else if (touch.aim.mag >= .88) touch.firing = true;
+    else if (touch.aim.mag < .75) touch.firing = false;
+    mouse.down = touch.firing;
     if (mouse.down) {                                                  // leichte Zielhilfe am Handy
       let bestA = .26, bz = null;
       for (const z of zombies) {
@@ -1255,10 +1259,13 @@ function renderTouchControls() {
   if (mv.id === null) txt('BEWEGEN', mbx, mby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
   // Ziel-/Feuer-Stick (rechts)
   const abx = am.id !== null ? am.ox : W - 40, aby = am.id !== null ? am.oy : H - 40;
-  const firing = am.id !== null && am.mag > .35;
+  const firing = am.id !== null && touch.firing;
   circle(abx, aby, 22, firing ? 'rgba(255,60,40,.12)' : 'rgba(255,255,255,.06)', firing ? 'rgba(255,90,60,.6)' : 'rgba(255,255,255,.25)');
+  circle(abx, aby, 22 * .88, null, firing ? 'rgba(255,90,60,.5)' : 'rgba(255,170,60,.28)', .6);   // Feuer-Grenze
   circle(abx + (am.dx || 0) * 22, aby + (am.dy || 0) * 22, 9, firing ? 'rgba(255,80,50,.4)' : 'rgba(255,255,255,.22)', 'rgba(255,255,255,.5)');
-  if (am.id === null) txt('ZIELEN+FEUER', abx, aby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
+  if (am.id === null) txt('ZIELEN · RAND = FEUER', abx - 6, aby + 25, 3.6, 'rgba(255,255,255,.45)', 'center');
+  else if (!firing) txt('ZIELEN', abx, aby - 31, 3.6, 'rgba(255,255,255,.55)', 'center');
+  else txt('FEUER', abx, aby - 31, 3.6, 'rgba(255,110,80,.9)', 'center');
   // Knöpfe
   mobileButtons = [
     { x: W - 96, y: H - 24, r: 10, label: 'SCHLAG', act: () => { touch.meleeTap = true; } },
@@ -1350,7 +1357,7 @@ function renderMenu() {
     buttons.push({ x: qx, y: qy, w: 70, h: fh, act: () => { try { window.close(); } catch (e) { } } });
   }
   if (touch.mobile) {
-    txt('Linker Daumen: bewegen · Rechter Daumen: zielen (weit ziehen = Feuer)', W / 2 + 40, oy + 160, 3.4, '#999', 'center');
+    txt('Linker Daumen: bewegen · Rechter Daumen: zielen (bis zum Rand = Feuer)', W / 2 + 40, oy + 160, 3.4, '#999', 'center');
     txt('Knöpfe: SCHLAG · R nachladen · LICHT · II Pause', W / 2 + 40, oy + 167, 3.4, '#999', 'center');
   } else {
     txt('WASD bewegen · Maus zielen · Linksklick schiessen · Rechtsklick Kolbenschlag', W / 2 + 40, oy + 160, 3.4, '#999', 'center');
